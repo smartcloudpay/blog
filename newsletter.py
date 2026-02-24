@@ -11,14 +11,21 @@ import base64
 from io import BytesIO
 
 # Configuration
-WP_URL = os.environ.get("WP_URL", "").split('/wp-login.php')[0]
+WP_URL = os.environ.get("WP_URL", "").strip().rstrip('/')
+if "/wp-admin" in WP_URL:
+    WP_URL = WP_URL.split("/wp-admin")[0]
+if "/wp-login" in WP_URL:
+    WP_URL = WP_URL.split("/wp-login")[0]
 WP_USER = os.environ.get("WP_USER")
 WP_APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# RSS Feeds
+# RSS Feeds and Category IDs
 CRYPTO_FEED = "https://news.google.com/rss/search?q=crypto+trading+when:1d&hl=en-US&gl=US&ceid=US:en"
 TRENDING_FEED = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
+
+CRYPTO_CAT_ID = 2
+TRENDING_CAT_ID = 3
 
 # Initialize Gemini Client
 client = None
@@ -169,7 +176,7 @@ def upload_media_to_wordpress(image_bytes, filename):
     
     return None
 
-def post_to_wordpress(title, content, source_link, published_date, featured_media_id=None):
+def post_to_wordpress(title, content, source_link, published_date, featured_media_id=None, category_id=1):
     """Posts a single article to WordPress."""
     
     # Check if credentials are set
@@ -188,7 +195,7 @@ def post_to_wordpress(title, content, source_link, published_date, featured_medi
         "content": content,
         "status": "publish", 
         "date": published_date.strftime("%Y-%m-%dT%H:%M:%S"),
-        "categories": [1] # Default category
+        "categories": [category_id]
     }
 
     if featured_media_id:
@@ -236,44 +243,50 @@ def main():
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=1)
     
-    posted_count = 0
     # Process up to 5 posts per feed to avoid hitting limits or being spammy
-    for entry in all_entries:
-        if posted_count >= 10:
-            break
-            
-        try:
-            published_parsed = parser.parse(entry.published)
-            if published_parsed.tzinfo is None:
-                 published_parsed = published_parsed.replace(tzinfo=timezone.utc)
-            
-            if published_parsed > cutoff:
-                title = entry.title
-                link = entry.link
-                summary = getattr(entry, 'summary', getattr(entry, 'description', ""))
+    for feed_url in feeds:
+        entries = get_news(feed_url)
+        # Choose category based on feed
+        cat_id = CRYPTO_CAT_ID if feed_url == CRYPTO_FEED else TRENDING_CAT_ID
+        
+        feed_posted = 0
+        for entry in entries:
+            if posted_count >= 10 or feed_posted >= 5:
+                break
                 
-                print(f"\n--- Processing: {title} ---")
+            try:
+                published_parsed = parser.parse(entry.published)
+                if published_parsed.tzinfo is None:
+                     published_parsed = published_parsed.replace(tzinfo=timezone.utc)
                 
-                # 1. Rewrite Content
-                rewritten_content = rewrite_article(title, summary, link)
-                
-                # 2. Generate Image
-                image_bytes = generate_image(title, rewritten_content)
-                
-                media_id = None
-                if image_bytes:
-                    # 3. Upload to WordPress
-                    filename = f"image_{int(time.time())}.png"
-                    media_id = upload_media_to_wordpress(image_bytes, filename)
-                
-                # 4. Post to WordPress
-                success = post_to_wordpress(title, rewritten_content, link, published_parsed, media_id)
-                if success:
-                    posted_count += 1
-                    time.sleep(5) # Delay to be polite and allow processing
-        except Exception as e:
-            print(f"Error processing entry: {e}")
-            continue
+                if published_parsed > cutoff:
+                    title = entry.title
+                    link = entry.link
+                    summary = getattr(entry, 'summary', getattr(entry, 'description', ""))
+                    
+                    print(f"\n--- Processing: {title} ---")
+                    
+                    # 1. Rewrite Content
+                    rewritten_content = rewrite_article(title, summary, link)
+                    
+                    # 2. Generate Image
+                    image_bytes = generate_image(title, rewritten_content)
+                    
+                    media_id = None
+                    if image_bytes:
+                        # 3. Upload to WordPress
+                        filename = f"image_{int(time.time())}.png"
+                        media_id = upload_media_to_wordpress(image_bytes, filename)
+                    
+                    # 4. Post to WordPress
+                    success = post_to_wordpress(title, rewritten_content, link, published_parsed, media_id, cat_id)
+                    if success:
+                        posted_count += 1
+                        feed_posted += 1
+                        time.sleep(5) # Delay to be polite and allow processing
+            except Exception as e:
+                print(f"Error processing entry: {e}")
+                continue
 
     print(f"Finished. Posted {posted_count} new articles.")
 
