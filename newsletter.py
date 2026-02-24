@@ -114,9 +114,9 @@ def generate_image(title, content):
                 
             print(f"Image Prompt: {image_prompt}")
 
-            # Use the new SDK for Imagen 3
+            # Use the newer model version
             response = client.models.generate_images(
-                model='imagen-3.0-generate-001',
+                model='imagen-3.0-generate-002',
                 prompt=image_prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=1,
@@ -124,19 +124,19 @@ def generate_image(title, content):
                 )
             )
             
-            if response.generated_images:
-                # The response object for generate_images returns images in a different format
-                # Usually it's response.generated_images[0].image.image_bytes
-                # But let me double check the help output again or try a safe access
+            if response and response.generated_images:
+                print("✅ Successfully generated image bytes.")
                 return response.generated_images[0].image.image_bytes
+            else:
+                print(f"Warning: No images generated. Response: {response}")
                 
             return None
         except Exception as e:
+            print(f"Attempt {attempt+1} failed: {e}")
             if "429" in str(e) and attempt < max_retries - 1:
-                print(f"Rate limited (429). Retrying in 20s... (Attempt {attempt+1}/{max_retries})")
-                time.sleep(20)
+                print(f"Rate limited (429). Retrying in 15s... ")
+                time.sleep(15)
                 continue
-            print(f"Error during image generation: {e}")
             break
             
     return None
@@ -144,6 +144,7 @@ def generate_image(title, content):
 def upload_media_to_wordpress(image_bytes, filename):
     """Uploads an image to WordPress Media Library."""
     if not WP_URL or not WP_USER or not WP_APP_PASSWORD:
+        print("Error: Missing WordPress credentials for media upload.")
         return None
 
     api_url = f"{WP_URL}/wp-json/wp/v2/media"
@@ -154,15 +155,17 @@ def upload_media_to_wordpress(image_bytes, filename):
         "Content-Type": "image/png"
     }
 
+    print(f"Uploading image to WordPress: {filename}")
     try:
         response = requests.post(api_url, data=image_bytes, headers=headers, auth=auth)
-        response.raise_for_status()
         if response.status_code == 201:
             media_id = response.json().get("id")
-            print(f"Successfully uploaded media. ID: {media_id}")
+            print(f"✅ Successfully uploaded media. ID: {media_id}")
             return media_id
+        else:
+            print(f"❌ Failed to upload media. Status: {response.status_code}, Response: {response.text}")
     except Exception as e:
-        print(f"Error uploading media to WordPress: {e}")
+        print(f"❌ Exception during media upload: {e}")
     
     return None
 
