@@ -30,7 +30,13 @@ TRENDING_CAT_ID = 3
 # Initialize Gemini Client
 client = None
 if GEMINI_API_KEY:
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        # Verify available models in logs to debug 404/429
+        models = client.models.list()
+        print(f"Verified available models: {[m.name for m in models]}")
+    except Exception as e:
+        print(f"Error initializing Gemini client: {e}")
 
 def get_news(feed_url):
     """Fetches news from the RSS feed."""
@@ -74,7 +80,7 @@ def rewrite_article_and_prompt(title, summary, source_url):
             """
             
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-1.5-flash',
                 contents=prompt
             )
             
@@ -154,7 +160,7 @@ def upload_media_to_wordpress(image_bytes, filename):
 
     print(f"Uploading image to WordPress: {filename}")
     try:
-        response = requests.post(api_url, data=image_bytes, headers=headers, auth=auth)
+        response = requests.post(api_url, data=image_bytes, headers=headers, auth=auth, timeout=30)
         if response.status_code == 201:
             media_id = response.json().get("id")
             print(f"✅ Successfully uploaded media. ID: {media_id}")
