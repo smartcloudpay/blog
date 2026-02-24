@@ -14,7 +14,7 @@ from io import BytesIO
 WP_URL = os.environ.get("WP_URL", "").split('/wp-login.php')[0]
 WP_USER = os.environ.get("WP_USER")
 WP_APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBvwwxY7Hv8HQccKmSKynNyzskKV__dHx4")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # RSS Feeds
 CRYPTO_FEED = "https://news.google.com/rss/search?q=crypto+trading+when:1d&hl=en-US&gl=US&ceid=US:en"
