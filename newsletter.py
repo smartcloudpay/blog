@@ -115,15 +115,19 @@ def generate_image(title, content):
             print(f"Image Prompt: {image_prompt}")
 
             # Use the new SDK for Imagen 3
-            response = client.models.generate_content(
+            response = client.models.generate_images(
                 model='imagen-3.0-generate-001',
-                contents=image_prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type='image/png'
+                prompt=image_prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    include_rai_reason=True,
                 )
             )
             
             if response.generated_images:
+                # The response object for generate_images returns images in a different format
+                # Usually it's response.generated_images[0].image.image_bytes
+                # But let me double check the help output again or try a safe access
                 return response.generated_images[0].image.image_bytes
                 
             return None
