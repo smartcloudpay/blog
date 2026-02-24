@@ -38,37 +38,39 @@ def get_news(feed_url):
     feed = feedparser.parse(feed_url)
     return feed.entries
 
-def rewrite_article(title, summary, source_url):
-    """Uses Gemini API to rewrite and expand the article snippet."""
+def rewrite_article_and_prompt(title, summary, source_url):
+    """Uses Gemini API to rewrite the article and generate an image prompt in one call."""
     if not client:
-        print("Warning: Gemini client not initialized. Skipping rewrite.")
-        return summary
+        print("Warning: Gemini client not initialized. Skipping generation.")
+        return summary, title
 
-    print(f"Rewriting article: {title}")
+    print(f"Generating content and image prompt for: {title}")
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # Enhanced prompt for better expansion
+            # Combined prompt to save API calls
             prompt = f"""
-            You are a professional journalist for a major news outlet. 
-            Your task is to take a short news snippet and expand it into a full-length, professional blog post (300-400 words).
+            You are a professional journalist and creative director. 
+            
+            Task 1 (Article): Expand this news snippet into a professional blog post (300-400 words).
+            Task 2 (Image Prompt): Create a short, vivid, professional photographic or high-quality digital art prompt for an image representing this news. Do not include text in the image.
             
             Original Title: {title}
             Original News Content: {summary}
             Source URL: {source_url}
             
-            Writing Guidelines:
-            1. **Expansion**: Do not just rewrite the snippet. Research or elaborate on the implications of this news and add expert-level analysis.
-            2. **Structure**: 
-               - Start with an engaging introduction.
-               - Use <h2> subheadings to break down the key points.
-               - Include a "Market Impact" (if financial) or "Significance" section.
-               - End with a conclusion or future outlook.
-            3. **Tone**: Objective, professional, and authoritative.
+            Writing Guidelines for Article:
+            1. **Expansion**: Elaborate on implications and add analysis.
+            2. **Structure**: Intro, <h2> subheadings, "Significance" section, Conclusion.
+            3. **Tone**: Objective, authoritative.
             4. **Format**: Use HTML tags ONLY (<h2>, <p>, <ul>, <li>). Do not use Markdown (**bold**). Use <strong> instead.
-            5. **Source**: At the very end, add: <p><strong>Source:</strong> <a href="{source_url}">{source_url}</a></p>
+            5. **Source**: At the end: <p><strong>Source:</strong> <a href="{source_url}">{source_url}</a></p>
             
-            IMPORTANT: Your output will be posted directly to WordPress. Do not include any title or preamble. Just the HTML body.
+            IMPORTANT: Output your response in this EXACT format:
+            ---CONTENT---
+            [HTML Content Here]
+            ---PROMPT---
+            [Image Prompt Here]
             """
             
             response = client.models.generate_content(
@@ -77,53 +79,42 @@ def rewrite_article(title, summary, source_url):
             )
             
             if response and response.text:
-                content = response.text.strip()
-                # Clean up potential markdown code blocks if Gemini includes them
-                if content.startswith("```html"):
+                text = response.text.strip()
+                if "---CONTENT---" in text and "---PROMPT---" in text:
+                    content = text.split("---CONTENT---")[1].split("---PROMPT---")[0].strip()
+                    image_prompt = text.split("---PROMPT---")[1].strip()
+                    
+                    # Clean up potential markdown code blocks
                     content = content.replace("```html", "").replace("```", "").strip()
-                elif content.startswith("```"):
-                    content = content.replace("```", "").strip()
-                
-                print(f"Successfully generated rewritten content ({len(content)} characters)")
-                return content
+                    
+                    print(f"✅ Successfully generated content and image prompt.")
+                    return content, image_prompt
+            
         except Exception as e:
             if "429" in str(e) and attempt < max_retries - 1:
-                print(f"Rate limited (429). Retrying in 15s... (Attempt {attempt+1}/{max_retries})")
-                time.sleep(15)
+                wait_time = (attempt + 1) * 30 # Back off more aggressively
+                print(f"Rate limited (429). Retrying in {wait_time}s... (Attempt {attempt+1}/{max_retries})")
+                time.sleep(wait_time)
                 continue
-            print(f"Error during rewriting: {e}")
+            print(f"Error during generation: {e}")
             break
             
-    print("Warning: Rewriting failed. Falling back to snippet.")
-    return summary
+    print("Warning: Generation failed. Falling back.")
+    return summary, title
 
-def generate_image(title, content):
+def generate_image(image_prompt):
     """Generates an image using Gemini Imagen 3."""
     if not client:
         print("Warning: Gemini client not initialized. Skipping image generation.")
         return None
 
-    print(f"Generating image for: {title}")
+    print(f"Generating image with prompt: {image_prompt[:50]}...")
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # Generate a descriptive prompt for Imagen
-            prompt_request = f"Create a short, vivid, professional photographic or high-quality digital art prompt for an image representing this news: '{title}'. The image should be suitable for a news blog featured image. Do not include text in the image."
-            prompt_response = client.models.generate_content(
-                model='gemini-2.0-flash',
-                contents=prompt_request
-            )
-            
-            if not prompt_response or not prompt_response.text:
-                image_prompt = title
-            else:
-                image_prompt = prompt_response.text.strip()
-                
-            print(f"Image Prompt: {image_prompt}")
-
-            # Use the newer model version
+            # Use the more compatible model version
             response = client.models.generate_images(
-                model='imagen-3.0-generate-002',
+                model='imagen-3.0-generate-001',
                 prompt=image_prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=1,
@@ -135,14 +126,13 @@ def generate_image(title, content):
                 print("✅ Successfully generated image bytes.")
                 return response.generated_images[0].image.image_bytes
             else:
-                print(f"Warning: No images generated. Response: {response}")
+                print(f"Warning: No images generated.")
                 
             return None
         except Exception as e:
-            print(f"Attempt {attempt+1} failed: {e}")
+            print(f"Image attempt {attempt+1} failed: {e}")
             if "429" in str(e) and attempt < max_retries - 1:
-                print(f"Rate limited (429). Retrying in 15s... ")
-                time.sleep(15)
+                time.sleep(20)
                 continue
             break
             
@@ -265,13 +255,16 @@ def main():
                     link = entry.link
                     summary = getattr(entry, 'summary', getattr(entry, 'description', ""))
                     
-                    print(f"\n--- Processing: {title} ---")
+                    print(f"\n--- {cat_id} Processing: {title} ---")
                     
-                    # 1. Rewrite Content
-                    rewritten_content = rewrite_article(title, summary, link)
+                    # 1. Rewrite Content & Generate Image Prompt (Combined to save API quota)
+                    rewritten_content, image_prompt = rewrite_article_and_prompt(title, summary, link)
+                    
+                    # Wait a bit between Gemini calls to avoid hitting RPM limits
+                    time.sleep(10)
                     
                     # 2. Generate Image
-                    image_bytes = generate_image(title, rewritten_content)
+                    image_bytes = generate_image(image_prompt)
                     
                     media_id = None
                     if image_bytes:
@@ -284,7 +277,9 @@ def main():
                     if success:
                         posted_count += 1
                         feed_posted += 1
-                        time.sleep(5) # Delay to be polite and allow processing
+                        # Important: Sleep longer between articles to stay under free tier RPM
+                        print("Waiting 30s before next article...")
+                        time.sleep(30) 
             except Exception as e:
                 print(f"Error processing entry: {e}")
                 continue
