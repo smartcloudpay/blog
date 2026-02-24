@@ -243,6 +243,7 @@ def main():
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=1)
     
+    posted_count = 0
     # Process up to 5 posts per feed to avoid hitting limits or being spammy
     for feed_url in feeds:
         entries = get_news(feed_url)
