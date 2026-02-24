@@ -2,3 +2,6 @@ requests
 feedparser
 beautifulsoup4
 python-dateutil
+google-generativeai
+google-genai
+pillow
