@@ -28,13 +28,14 @@ CRYPTO_CAT_ID = 2
 TRENDING_CAT_ID = 3
 
 # Model Selection
-# We'll use 1.5 Flash for best free-tier stability (bypassing 2.0 flash limits)
-DEFAULT_CONTENT_MODEL = 'gemini-1.5-flash-latest' 
-IMAGE_MODEL = 'imagen-3.0-generate-001' 
+# We'll use the exact names from the 'Verified available models' list in the logs
+DEFAULT_CONTENT_MODEL = 'gemini-2.0-flash' 
+IMAGE_MODEL = 'gemini-2.0-flash-exp-image-generation' 
 
 # Generic Fallback Images (Copyright-Free / Unsplash)
-CRYPTO_FALLBACK = "https://images.unsplash.com/photo-1621761191319-c6fb62002895?auto=format&fit=crop&q=80&w=800"
-TRENDING_FALLBACK = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&q=80&w=800"
+# Verified working URLs:
+CRYPTO_FALLBACK = "https://images.unsplash.com/photo-1518546305927-5a555bb7020d?auto=format&fit=crop&q=80&w=800"
+TRENDING_FALLBACK = "https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&q=80&w=800"
 
 # Initialize Gemini Client
 client = None
@@ -127,15 +128,12 @@ def generate_image(image_prompt):
         print("Warning: Gemini client not initialized. Skipping image generation.")
         return None
 
-    # Priority 1: The experimental model seen in the user's list
-    # Priority 2: Other image-capable models seen in the list
-    # Priority 3: Standard Imagen names
+    # Priority List based on verified available models in user logs
     models_to_try = [
         IMAGE_MODEL,
-        'gemini-2.5-flash-image',
-        'gemini-3-pro-image-preview',
         'imagen-3.0-generate-001',
-        'imagen-3.0-generate-002'
+        'imagen-3.0-generate-002',
+        'gemini-2.5-flash-image'
     ]
 
     print(f"Generating image with prompt: {image_prompt[:70]}...")
@@ -327,9 +325,12 @@ def main():
                         print(f"Warning: No AI image for {entry.title}. Using generic fallback.")
                         fallback_url = CRYPTO_FALLBACK if "crypto" in feed_url else TRENDING_FALLBACK
                         try:
-                            response = requests.get(fallback_url, timeout=10)
+                            response = requests.get(fallback_url, timeout=15)
                             if response.status_code == 200:
                                 image_bytes = response.content
+                                print(f"✅ Successfully fetched fallback image from {fallback_url}")
+                            else:
+                                print(f"❌ Fallback image fetch failed with status {response.status_code} for {fallback_url}")
                         except Exception as img_err:
                             print(f"Error fetching fallback image: {img_err}")
                             
