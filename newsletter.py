@@ -137,16 +137,16 @@ def generate_image(image_prompt):
     print(f"Generating image with prompt: {image_prompt[:70]}...")
     
     for model_name in models_to_try:
-        # Some SDK versions prefer the full 'models/' prefix, some don't. 
-        # We'll try it as provided in the list first.
+        # Standardize model name: ensure it has 'models/' prefix for the SDK
         full_model_path = model_name if model_name.startswith('models/') else f"models/{model_name}"
+        model_id_for_sdk = full_model_path.replace('models/', '') # SDK generate_images often wants short ID
         
         print(f"Attempting image generation with model: {full_model_path}")
         max_retries = 2
         for attempt in range(max_retries):
             try:
                 response = client.models.generate_images(
-                    model=clean_model_name,
+                    model=model_id_for_sdk,
                     prompt=image_prompt,
                     config=types.GenerateImagesConfig(
                         number_of_images=1,
@@ -155,23 +155,23 @@ def generate_image(image_prompt):
                 )
                 
                 if response and response.generated_images:
-                    print(f"✅ Successfully generated image using {clean_model_name}.")
+                    print(f"✅ Successfully generated image using {model_id_for_sdk}.")
                     return response.generated_images[0].image.image_bytes
                 else:
-                    print(f"Warning: No images generated with {clean_model_name}.")
+                    print(f"Warning: No images generated with {model_id_for_sdk}.")
                     break # Try next model
                     
             except Exception as e:
                 # If 404, we definitely have the wrong model name
                 if "404" in str(e):
-                    print(f"Model {clean_model_name} not found (404). Trying next model...")
+                    print(f"Model {model_id_for_sdk} not found (404). Trying next model...")
                     break 
                 # If 429, we are hitting quota
                 if "429" in str(e) and attempt < max_retries - 1:
-                    print(f"Rate limited (429) for {clean_model_name}. Retrying in 20s...")
+                    print(f"Rate limited (429) for {model_id_for_sdk}. Retrying in 20s...")
                     time.sleep(20)
                     continue
-                print(f"Attempt failed for {clean_model_name}: {e}")
+                print(f"Attempt failed for {model_id_for_sdk}: {e}")
                 break # Try next model
             
     print("❌ All image models failed.")
