@@ -27,6 +27,11 @@ TRENDING_FEED = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
 CRYPTO_CAT_ID = 2
 TRENDING_CAT_ID = 3
 
+# Model Selection
+# We'll prioritize models that were verified available in the logs
+DEFAULT_CONTENT_MODEL = 'gemini-2.0-flash' 
+IMAGE_MODEL = 'gemini-2.0-flash-exp-image-generation' # This was specifically listed in the user's available models
+
 # Initialize Gemini Client
 client = None
 if GEMINI_API_KEY:
@@ -84,7 +89,7 @@ def rewrite_article_and_prompt(title, summary, source_url):
             """
             
             response = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model=DEFAULT_CONTENT_MODEL,
                 contents=prompt
             )
             
@@ -113,27 +118,32 @@ def rewrite_article_and_prompt(title, summary, source_url):
     return summary, title
 
 def generate_image(image_prompt):
-    """Generates an image using Gemini Imagen 3 with fallbacks for model names."""
+    """Generates an image using Gemini Imagen 3 with fallbacks based on verified availability."""
     if not client:
         print("Warning: Gemini client not initialized. Skipping image generation.")
         return None
 
-    # List of models to try in order of preference
+    # Priority 1: The model specifically seen in the user's available models list
+    # Priority 2: Standard names as fallbacks
     models_to_try = [
+        IMAGE_MODEL,
         'imagen-3.0-generate-001',
         'imagen-3.0-generate-002',
-        'imagen-3.0-fast-generate-001',
-        'imagen-3.0-capability-001'
+        'imagen-3.0-fast-generate-001'
     ]
 
     print(f"Generating image with prompt: {image_prompt[:70]}...")
     
     for model_name in models_to_try:
+        # Strip 'models/' prefix if present for the generate_images call
+        clean_model_name = model_name.replace('models/', '')
+        
+        print(f"Attempting image generation with model: {clean_model_name}")
         max_retries = 2
         for attempt in range(max_retries):
             try:
                 response = client.models.generate_images(
-                    model=model_name,
+                    model=clean_model_name,
                     prompt=image_prompt,
                     config=types.GenerateImagesConfig(
                         number_of_images=1,
@@ -142,21 +152,23 @@ def generate_image(image_prompt):
                 )
                 
                 if response and response.generated_images:
-                    print(f"✅ Successfully generated image using {model_name}.")
+                    print(f"✅ Successfully generated image using {clean_model_name}.")
                     return response.generated_images[0].image.image_bytes
                 else:
-                    print(f"Warning: No images generated with {model_name}.")
+                    print(f"Warning: No images generated with {clean_model_name}.")
                     break # Try next model
                     
             except Exception as e:
+                # If 404, we definitely have the wrong model name
                 if "404" in str(e):
-                    print(f"Model {model_name} not found (404). Trying next model...")
-                    break # Skip retries for 404
+                    print(f"Model {clean_model_name} not found (404). Trying next model...")
+                    break 
+                # If 429, we are hitting quota
                 if "429" in str(e) and attempt < max_retries - 1:
-                    print(f"Rate limited (429) for {model_name}. Retrying in 20s...")
+                    print(f"Rate limited (429) for {clean_model_name}. Retrying in 20s...")
                     time.sleep(20)
                     continue
-                print(f"Attempt failed for {model_name}: {e}")
+                print(f"Attempt failed for {clean_model_name}: {e}")
                 break # Try next model
             
     print("❌ All image models failed.")
