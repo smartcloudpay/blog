@@ -28,9 +28,9 @@ CRYPTO_CAT_ID = 2
 TRENDING_CAT_ID = 3
 
 # Model Selection
-# We'll prioritize models that were verified available in the logs
-DEFAULT_CONTENT_MODEL = 'gemini-2.0-flash' 
-IMAGE_MODEL = 'gemini-2.0-flash-exp-image-generation' # This was specifically listed in the user's available models
+# We'll use the 'latest' aliases and specific exp models found in the logs
+DEFAULT_CONTENT_MODEL = 'gemini-flash-latest' 
+IMAGE_MODEL = 'gemini-2.0-flash-exp-image-generation' 
 
 # Initialize Gemini Client
 client = None
@@ -123,22 +123,25 @@ def generate_image(image_prompt):
         print("Warning: Gemini client not initialized. Skipping image generation.")
         return None
 
-    # Priority 1: The model specifically seen in the user's available models list
-    # Priority 2: Standard names as fallbacks
+    # Priority 1: The experimental model seen in the user's list
+    # Priority 2: Other image-capable models seen in the list
+    # Priority 3: Standard Imagen names
     models_to_try = [
         IMAGE_MODEL,
+        'gemini-2.5-flash-image',
+        'gemini-3-pro-image-preview',
         'imagen-3.0-generate-001',
-        'imagen-3.0-generate-002',
-        'imagen-3.0-fast-generate-001'
+        'imagen-3.0-generate-002'
     ]
 
     print(f"Generating image with prompt: {image_prompt[:70]}...")
     
     for model_name in models_to_try:
-        # Strip 'models/' prefix if present for the generate_images call
-        clean_model_name = model_name.replace('models/', '')
+        # Some SDK versions prefer the full 'models/' prefix, some don't. 
+        # We'll try it as provided in the list first.
+        full_model_path = model_name if model_name.startswith('models/') else f"models/{model_name}"
         
-        print(f"Attempting image generation with model: {clean_model_name}")
+        print(f"Attempting image generation with model: {full_model_path}")
         max_retries = 2
         for attempt in range(max_retries):
             try:
