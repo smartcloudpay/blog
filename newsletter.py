@@ -33,8 +33,12 @@ if GEMINI_API_KEY:
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         # Verify available models in logs to debug 404/429
-        models = client.models.list()
-        print(f"Verified available models: {[m.name for m in models]}")
+        try:
+            models = client.models.list()
+            model_names = [m.name for m in models]
+            print(f"Verified available models: {model_names}")
+        except Exception as list_err:
+            print(f"Warning: Could not list models: {list_err}")
     except Exception as e:
         print(f"Error initializing Gemini client: {e}")
 
@@ -109,39 +113,53 @@ def rewrite_article_and_prompt(title, summary, source_url):
     return summary, title
 
 def generate_image(image_prompt):
-    """Generates an image using Gemini Imagen 3."""
+    """Generates an image using Gemini Imagen 3 with fallbacks for model names."""
     if not client:
         print("Warning: Gemini client not initialized. Skipping image generation.")
         return None
 
-    print(f"Generating image with prompt: {image_prompt[:50]}...")
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            # Use the more compatible model version
-            response = client.models.generate_images(
-                model='imagen-3.0-generate-001',
-                prompt=image_prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    include_rai_reason=True,
+    # List of models to try in order of preference
+    models_to_try = [
+        'imagen-3.0-generate-001',
+        'imagen-3.0-generate-002',
+        'imagen-3.0-fast-generate-001',
+        'imagen-3.0-capability-001'
+    ]
+
+    print(f"Generating image with prompt: {image_prompt[:70]}...")
+    
+    for model_name in models_to_try:
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_images(
+                    model=model_name,
+                    prompt=image_prompt,
+                    config=types.GenerateImagesConfig(
+                        number_of_images=1,
+                        include_rai_reason=True,
+                    )
                 )
-            )
-            
-            if response and response.generated_images:
-                print("✅ Successfully generated image bytes.")
-                return response.generated_images[0].image.image_bytes
-            else:
-                print(f"Warning: No images generated.")
                 
-            return None
-        except Exception as e:
-            print(f"Image attempt {attempt+1} failed: {e}")
-            if "429" in str(e) and attempt < max_retries - 1:
-                time.sleep(20)
-                continue
-            break
+                if response and response.generated_images:
+                    print(f"✅ Successfully generated image using {model_name}.")
+                    return response.generated_images[0].image.image_bytes
+                else:
+                    print(f"Warning: No images generated with {model_name}.")
+                    break # Try next model
+                    
+            except Exception as e:
+                if "404" in str(e):
+                    print(f"Model {model_name} not found (404). Trying next model...")
+                    break # Skip retries for 404
+                if "429" in str(e) and attempt < max_retries - 1:
+                    print(f"Rate limited (429) for {model_name}. Retrying in 20s...")
+                    time.sleep(20)
+                    continue
+                print(f"Attempt failed for {model_name}: {e}")
+                break # Try next model
             
+    print("❌ All image models failed.")
     return None
 
 def upload_media_to_wordpress(image_bytes, filename):
