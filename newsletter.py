@@ -28,9 +28,13 @@ CRYPTO_CAT_ID = 2
 TRENDING_CAT_ID = 3
 
 # Model Selection
-# We'll use the 'latest' aliases and specific exp models found in the logs
-DEFAULT_CONTENT_MODEL = 'gemini-flash-latest' 
-IMAGE_MODEL = 'gemini-2.0-flash-exp-image-generation' 
+# We'll use 1.5 Flash for best free-tier stability (bypassing 2.0 flash limits)
+DEFAULT_CONTENT_MODEL = 'gemini-1.5-flash-latest' 
+IMAGE_MODEL = 'imagen-3.0-generate-001' 
+
+# Generic Fallback Images (Copyright-Free / Unsplash)
+CRYPTO_FALLBACK = "https://images.unsplash.com/photo-1621761191319-c6fb62002895?auto=format&fit=crop&q=80&w=800"
+TRENDING_FALLBACK = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&q=80&w=800"
 
 # Initialize Gemini Client
 client = None
@@ -137,16 +141,16 @@ def generate_image(image_prompt):
     print(f"Generating image with prompt: {image_prompt[:70]}...")
     
     for model_name in models_to_try:
-        # Standardize model name: ensure it has 'models/' prefix for the SDK
-        full_model_path = model_name if model_name.startswith('models/') else f"models/{model_name}"
-        model_id_for_sdk = full_model_path.replace('models/', '') # SDK generate_images often wants short ID
+        # Some SDK versions want 'imagen-3.0-generate-001', some want 'models/imagen-3.0-generate-001'
+        # We'll try without the prefix first as it's more common in the SDK examples
+        clean_model_name = model_name.replace('models/', '')
         
-        print(f"Attempting image generation with model: {full_model_path}")
+        print(f"Attempting image generation with model: {clean_model_name}")
         max_retries = 2
         for attempt in range(max_retries):
             try:
                 response = client.models.generate_images(
-                    model=model_id_for_sdk,
+                    model=clean_model_name,
                     prompt=image_prompt,
                     config=types.GenerateImagesConfig(
                         number_of_images=1,
@@ -155,23 +159,36 @@ def generate_image(image_prompt):
                 )
                 
                 if response and response.generated_images:
-                    print(f"✅ Successfully generated image using {model_id_for_sdk}.")
+                    print(f"✅ Successfully generated image using {clean_model_name}.")
                     return response.generated_images[0].image.image_bytes
                 else:
-                    print(f"Warning: No images generated with {model_id_for_sdk}.")
+                    print(f"Warning: No images generated with {clean_model_name}.")
                     break # Try next model
                     
             except Exception as e:
-                # If 404, we definitely have the wrong model name
-                if "404" in str(e):
-                    print(f"Model {model_id_for_sdk} not found (404). Trying next model...")
-                    break 
-                # If 429, we are hitting quota
+                # If 404, try with the 'models/' prefix as a last resort for this specific model
+                if "404" in str(e) and not clean_model_name.startswith('models/'):
+                    prefixed_name = f"models/{clean_model_name}"
+                    print(f"404 for {clean_model_name}. Retrying with prefix {prefixed_name}...")
+                    try:
+                        response = client.models.generate_images(
+                            model=prefixed_name,
+                            prompt=image_prompt,
+                            config=types.GenerateImagesConfig(
+                                number_of_images=1,
+                                include_rai_reason=True,
+                            )
+                        )
+                        if response and response.generated_images:
+                            return response.generated_images[0].image.image_bytes
+                    except:
+                        pass
+                    
                 if "429" in str(e) and attempt < max_retries - 1:
-                    print(f"Rate limited (429) for {model_id_for_sdk}. Retrying in 20s...")
+                    print(f"Rate limited (429) for {clean_model_name}. Retrying in 20s...")
                     time.sleep(20)
                     continue
-                print(f"Attempt failed for {model_id_for_sdk}: {e}")
+                print(f"Attempt failed for {clean_model_name}: {e}")
                 break # Try next model
             
     print("❌ All image models failed.")
@@ -305,13 +322,24 @@ def main():
                     # 2. Generate Image
                     image_bytes = generate_image(image_prompt)
                     
+                    # 3. Fallback to generic image if AI fails to ensure the site looks good
+                    if not image_bytes:
+                        print(f"Warning: No AI image for {entry.title}. Using generic fallback.")
+                        fallback_url = CRYPTO_FALLBACK if "crypto" in feed_url else TRENDING_FALLBACK
+                        try:
+                            response = requests.get(fallback_url, timeout=10)
+                            if response.status_code == 200:
+                                image_bytes = response.content
+                        except Exception as img_err:
+                            print(f"Error fetching fallback image: {img_err}")
+                            
+                    # 4. Upload to WordPress
                     media_id = None
                     if image_bytes:
-                        # 3. Upload to WordPress
                         filename = f"image_{int(time.time())}.png"
                         media_id = upload_media_to_wordpress(image_bytes, filename)
                     
-                    # 4. Post to WordPress
+                    # 5. Post to WordPress
                     success = post_to_wordpress(title, rewritten_content, link, published_parsed, media_id, cat_id)
                     if success:
                         posted_count += 1
