@@ -107,6 +107,10 @@ def rewrite_article_and_prompt(title, summary, source_url):
                     # Clean up potential markdown code blocks
                     content = content.replace("```html", "").replace("```", "").strip()
                     
+                    # Inject SEO CTA
+                    cta_html = '\n\n<hr>\n<p><em>Powered by <strong><a href="https://smartcloudpay.com">SmartCloudpay</a></strong> – The Premier Keyboard Crypto Payment Gateway.</em></p>'
+                    content += cta_html
+                    
                     print(f"✅ Successfully generated content and image prompt.")
                     return content, image_prompt
             
@@ -120,7 +124,8 @@ def rewrite_article_and_prompt(title, summary, source_url):
             break
             
     print("Warning: Generation failed. Falling back.")
-    return summary, title
+    cta_html = '\n\n<hr>\n<p><em>Powered by <strong><a href="https://smartcloudpay.com">SmartCloudpay</a></strong> – The Premier Keyboard Crypto Payment Gateway.</em></p>'
+    return summary + cta_html, title
 
 def generate_image(image_prompt):
     """Generates an image using Gemini Imagen 3 with fallbacks based on verified availability."""
